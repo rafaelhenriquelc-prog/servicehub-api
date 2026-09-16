@@ -11,7 +11,9 @@ O PetServiceHub centraliza o fluxo operacional do estabelecimento: o tutor é ca
 - Spring Web MVC
 - Spring Data JPA
 - Bean Validation
-- Banco de dados H2 (em memória)
+- PostgreSQL (execução da aplicação)
+- H2 em memória (apenas nos testes)
+
 - Springdoc OpenAPI / Swagger UI
 - Lombok
 - Maven
@@ -91,7 +93,7 @@ Relacionamentos:
 
 ## Como executar os testes
 
-É necessário ter o JDK 21 instalado.
+É necessário ter o JDK 21 instalado. Os testes usam H2 em memória e **não** precisam do PostgreSQL.
 
 Na raiz do projeto:
 
@@ -101,13 +103,51 @@ Na raiz do projeto:
 
 O comando esperado ao final é `BUILD SUCCESS`.
 
-## Como iniciar a aplicação
+## Como iniciar a aplicação (PostgreSQL)
+
+A execução local usa PostgreSQL. URL, usuário e senha são lidos das variáveis de ambiente `DATABASE_URL`, `DATABASE_USERNAME` e `DATABASE_PASSWORD`. Não grave senha no código nem no Git.
+
+### 1. Instalar o PostgreSQL (Windows)
+
+Instale o PostgreSQL e, durante a instalação, anote a senha do usuário `postgres`. Essa senha não deve ser commitada.
+
+### 2. Criar o banco
+
+No SQL Shell (`psql`) ou no pgAdmin, execute:
+
+```sql
+CREATE DATABASE petservicehub;
+```
+
+### 3. Configurar as variáveis de ambiente (PowerShell)
+
+Na mesma janela em que a aplicação será iniciada:
+
+```powershell
+$env:DATABASE_URL="jdbc:postgresql://localhost:5432/petservicehub"
+$env:DATABASE_USERNAME="postgres"
+$env:DATABASE_PASSWORD="coloque-aqui-a-senha-do-postgres"
+```
+
+Substitua `coloque-aqui-a-senha-do-postgres` pela senha definida na instalação. Se o banco, o usuário ou a porta forem diferentes, ajuste `DATABASE_URL` e `DATABASE_USERNAME`.
+
+Para persistir as variáveis na sessão do Windows (usuário atual):
+
+```powershell
+setx DATABASE_URL "jdbc:postgresql://localhost:5432/petservicehub"
+setx DATABASE_USERNAME "postgres"
+setx DATABASE_PASSWORD "coloque-aqui-a-senha-do-postgres"
+```
+
+Depois do `setx`, feche e abra o terminal para as variáveis valerem.
+
+### 4. Iniciar a API
 
 ```powershell
 .\mvnw.cmd spring-boot:run
 ```
 
-A API fica disponível em `http://localhost:8080`.
+A API fica disponível em `http://localhost:8080`. As tabelas são criadas ou atualizadas automaticamente (`spring.jpa.hibernate.ddl-auto=update`).
 
 ## Swagger
 
@@ -118,18 +158,6 @@ Documentação interativa da API:
 Especificação OpenAPI em JSON:
 
 [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
-
-## Console H2
-
-O banco em memória pode ser inspecionado em:
-
-[http://localhost:8080/h2-console](http://localhost:8080/h2-console)
-
-Dados de conexão:
-
-- **JDBC URL:** `jdbc:h2:mem:petservicehub`
-- **User Name:** `sa`
-- **Password:** (deixar em branco)
 
 ## Ordem de cadastro
 
