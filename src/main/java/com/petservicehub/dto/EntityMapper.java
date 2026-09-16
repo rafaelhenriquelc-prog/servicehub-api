@@ -1,60 +1,69 @@
 package com.petservicehub.dto;
 
-import com.petservicehub.model.Agendamento;
-import com.petservicehub.model.Pet;
-import com.petservicehub.model.Servico;
-import com.petservicehub.model.Tutor;
+import com.petservicehub.model.OfferedService;
+import com.petservicehub.model.Review;
+import com.petservicehub.model.ServiceRequest;
+import com.petservicehub.model.User;
 
 public final class EntityMapper {
 
 	private EntityMapper() {
 	}
 
-	public static TutorResponse toResponse(Tutor tutor) {
-		return new TutorResponse(tutor.getId(), tutor.getNome(), tutor.getEmail(), tutor.getTelefone(), tutor.getAtivo());
+	public static UserResponse toResponse(User user) {
+		return new UserResponse(
+				user.getId(),
+				user.getFullName(),
+				user.getEmail(),
+				user.getPhone(),
+				user.getBio(),
+				user.getAvatarUrl(),
+				user.getRole(),
+				user.getActive(),
+				user.getCreatedAt(),
+				user.getUpdatedAt());
 	}
 
-	public static TutorResumo toResumo(Tutor tutor) {
-		return new TutorResumo(tutor.getId(), tutor.getNome(), tutor.getEmail());
+	public static UserSummary toSummary(User user) {
+		return new UserSummary(user.getId(), user.getFullName(), user.getEmail(), user.getRole());
 	}
 
-	public static PetResponse toResponse(Pet pet) {
-		return new PetResponse(
-				pet.getId(),
-				pet.getNome(),
-				pet.getEspecie(),
-				pet.getRaca(),
-				pet.getIdade(),
-				pet.getAtivo(),
-				toResumo(pet.getTutor()));
+	public static OfferedServiceResponse toResponse(OfferedService service) {
+		return new OfferedServiceResponse(
+				service.getId(),
+				service.getTitle(),
+				service.getDescription(),
+				service.getPrice(),
+				service.getCategory(),
+				toSummary(service.getProvider()),
+				service.getActive(),
+				service.getCreatedAt());
 	}
 
-	public static PetResumo toResumo(Pet pet) {
-		return new PetResumo(pet.getId(), pet.getNome(), pet.getEspecie());
+	public static OfferedServiceSummary toSummary(OfferedService service) {
+		return new OfferedServiceSummary(service.getId(), service.getTitle(), service.getPrice(), service.getCategory());
 	}
 
-	public static ServicoResponse toResponse(Servico servico) {
-		return new ServicoResponse(
-				servico.getId(),
-				servico.getNome(),
-				servico.getDescricao(),
-				servico.getPreco(),
-				servico.getDuracaoMinutos(),
-				servico.getAtivo());
+	public static ServiceRequestResponse toResponse(ServiceRequest request) {
+		return new ServiceRequestResponse(
+				request.getId(),
+				toSummary(request.getService()),
+				toSummary(request.getClient()),
+				request.getStatus(),
+				request.getScheduledAt(),
+				request.getNotes(),
+				request.getTotalPrice(),
+				request.getCreatedAt(),
+				request.getUpdatedAt());
 	}
 
-	public static ServicoResumo toResumo(Servico servico) {
-		return new ServicoResumo(servico.getId(), servico.getNome(), servico.getPreco(), servico.getDuracaoMinutos());
-	}
-
-	public static AgendamentoResponse toResponse(Agendamento agendamento) {
-		return new AgendamentoResponse(
-				agendamento.getId(),
-				toResumo(agendamento.getPet()),
-				toResumo(agendamento.getTutor()),
-				toResumo(agendamento.getServico()),
-				agendamento.getDataHora(),
-				agendamento.getObservacao(),
-				agendamento.getStatus());
+	public static ReviewResponse toResponse(Review review) {
+		return new ReviewResponse(
+				review.getId(),
+				review.getRequest().getId(),
+				toSummary(review.getReviewer()),
+				review.getRating(),
+				review.getComment(),
+				review.getCreatedAt());
 	}
 }

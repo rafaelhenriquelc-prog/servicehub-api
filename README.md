@@ -1,8 +1,8 @@
-# PetServiceHub API
+# ServiceHub API
 
-API REST para cadastro e gestão de tutores, animais de estimação, serviços e agendamentos de um hub de atendimento pet.
+API REST da plataforma ServiceHub. Clientes localizam prestadores, contratam serviços e registram avaliações após a conclusão do atendimento.
 
-O PetServiceHub centraliza o fluxo operacional do estabelecimento: o tutor é cadastrado, seus pets são vinculados a ele, os serviços oferecidos ficam disponíveis no catálogo e os agendamentos unem pet, tutor e serviço em uma data e hora específicas.
+O projeto Maven continua se chamando `petservicehub-api`, mas o domínio da aplicação é o ServiceHub da disciplina.
 
 ## Tecnologias
 
@@ -13,71 +13,73 @@ O PetServiceHub centraliza o fluxo operacional do estabelecimento: o tutor é ca
 - Bean Validation
 - PostgreSQL (execução da aplicação)
 - H2 em memória (apenas nos testes)
-
 - Springdoc OpenAPI / Swagger UI
 - Lombok
 - Maven
 - JUnit 5, MockMvc e Mockito
 
+A senha do usuário é recebida no cadastro e gravada somente como hash (`passwordHash`). A API nunca devolve a senha. Não há autenticação nem JWT nesta versão.
+
 ## Entidades e relacionamentos
 
 | Entidade | Campos principais |
 |---|---|
-| **Tutor** | id, nome, e-mail, telefone, ativo |
-| **Pet** | id, nome, espécie, raça, idade, tutor, ativo |
-| **Serviço** | id, nome, descrição, preço, duração em minutos, ativo |
-| **Agendamento** | id, pet, tutor, serviço, data e hora, observação, status |
+| **User** | id, fullName, email (único), passwordHash, phone, bio, avatarUrl, role (`CLIENT` ou `PROVIDER`), active, createdAt, updatedAt |
+| **Service** | id, title, description, price, category, provider (User), active, createdAt |
+| **ServiceRequest** | id, service, client (User), status, scheduledAt, notes, totalPrice, createdAt, updatedAt |
+| **Review** | id, request (relação única), reviewer (User), rating (1 a 5), comment, createdAt |
 
-Relacionamentos:
+Relacionamentos e regras:
 
-- Um tutor pode ter vários pets.
-- Cada pet pertence a um único tutor.
-- Cada agendamento referencia um pet, um tutor e um serviço.
-- O pet informado no agendamento precisa pertencer ao tutor informado.
-- O status do agendamento pode ser `AGENDADO`, `CONCLUIDO` ou `CANCELADO`.
+- Somente um usuário `PROVIDER` pode ser associado como prestador de um serviço.
+- Somente um usuário `CLIENT` pode contratar um serviço.
+- O `totalPrice` da solicitação é preenchido com o preço do serviço no momento do cadastro ou da atualização.
+- Status da solicitação: `PENDING`, `ACCEPTED`, `IN_PROGRESS`, `COMPLETED` ou `CANCELLED`.
+- A avaliação só pode ser cadastrada para uma solicitação `COMPLETED`.
+- O avaliador deve ser o cliente da solicitação.
+- Uma solicitação pode receber somente uma avaliação.
 
 ## Principais endpoints
 
-### Tutores — `/api/tutores`
+### Usuários — `/api/users`
 
 | Método | Caminho | Descrição |
 |---|---|---|
-| `POST` | `/api/tutores` | Cadastra um tutor |
-| `GET` | `/api/tutores` | Lista tutores (`?ativo=`) |
-| `GET` | `/api/tutores/{id}` | Busca um tutor pelo id |
-| `GET` | `/api/tutores/{id}/pets` | Lista os pets do tutor |
-| `PUT` | `/api/tutores/{id}` | Atualiza um tutor |
-| `DELETE` | `/api/tutores/{id}` | Exclui um tutor |
+| `POST` | `/api/users` | Cadastra um cliente ou prestador |
+| `GET` | `/api/users` | Lista usuários (`?role=` e `?active=`) |
+| `GET` | `/api/users/{id}` | Busca um usuário pelo id |
+| `PUT` | `/api/users/{id}` | Atualiza um usuário |
+| `DELETE` | `/api/users/{id}` | Exclui um usuário |
 
-### Pets — `/api/pets`
-
-| Método | Caminho | Descrição |
-|---|---|---|
-| `POST` | `/api/pets` | Cadastra um pet vinculado a um tutor |
-| `GET` | `/api/pets` | Lista pets (`?ativo=` e `?tutorId=`) |
-| `GET` | `/api/pets/{id}` | Busca um pet pelo id |
-| `PUT` | `/api/pets/{id}` | Atualiza um pet |
-| `DELETE` | `/api/pets/{id}` | Exclui um pet |
-
-### Serviços — `/api/servicos`
+### Serviços — `/api/services`
 
 | Método | Caminho | Descrição |
 |---|---|---|
-| `POST` | `/api/servicos` | Cadastra um serviço |
-| `GET` | `/api/servicos` | Lista serviços (`?ativo=`) |
-| `GET` | `/api/servicos/{id}` | Busca um serviço pelo id |
-| `PUT` | `/api/servicos/{id}` | Atualiza um serviço |
-| `DELETE` | `/api/servicos/{id}` | Exclui um serviço |
+| `POST` | `/api/services` | Cadastra um serviço de um prestador |
+| `GET` | `/api/services` | Lista serviços (`?active=`, `?providerId=` e `?category=`) |
+| `GET` | `/api/services/{id}` | Busca um serviço pelo id |
+| `PUT` | `/api/services/{id}` | Atualiza um serviço |
+| `DELETE` | `/api/services/{id}` | Exclui um serviço |
 
-### Agendamentos — `/api/agendamentos`
+### Solicitações — `/api/service-requests`
 
 | Método | Caminho | Descrição |
 |---|---|---|
-| `POST` | `/api/agendamentos` | Cadastra um agendamento |
-| `GET` | `/api/agendamentos` | Lista agendamentos (`?status=`, `?tutorId=`, `?petId=`, `?servicoId=`) |
-| `GET` | `/api/agendamentos/{id}` | Busca um agendamento pelo id |
-| `PUT` | `/api/agendamentos/{id}` | Atualiza um agendamento |
-| `DELETE` | `/api/agendamentos/{id}` | Exclui um agendamento |
+| `POST` | `/api/service-requests` | Cadastra uma contratação |
+| `GET` | `/api/service-requests` | Lista solicitações (`?status=`, `?clientId=` e `?serviceId=`) |
+| `GET` | `/api/service-requests/{id}` | Busca uma solicitação pelo id |
+| `PUT` | `/api/service-requests/{id}` | Atualiza uma solicitação |
+| `DELETE` | `/api/service-requests/{id}` | Exclui uma solicitação |
+
+### Avaliações — `/api/reviews`
+
+| Método | Caminho | Descrição |
+|---|---|---|
+| `POST` | `/api/reviews` | Cadastra uma avaliação |
+| `GET` | `/api/reviews` | Lista avaliações (`?reviewerId=` e `?requestId=`) |
+| `GET` | `/api/reviews/{id}` | Busca uma avaliação pelo id |
+| `PUT` | `/api/reviews/{id}` | Atualiza uma avaliação |
+| `DELETE` | `/api/reviews/{id}` | Exclui uma avaliação |
 
 ## Códigos HTTP
 
@@ -86,9 +88,9 @@ Relacionamentos:
 | **200 OK** | Consulta ou atualização concluída com sucesso |
 | **201 Created** | Recurso cadastrado com sucesso |
 | **204 No Content** | Exclusão concluída com sucesso |
-| **400 Bad Request** | Dados inválidos, tutor/pet/serviço inativo ou pet que não pertence ao tutor |
+| **400 Bad Request** | Dados inválidos ou regra de negócio (perfil incompatível, serviço inativo, avaliação fora das regras) |
 | **404 Not Found** | Recurso não encontrado |
-| **409 Conflict** | E-mail de tutor duplicado ou exclusão bloqueada por vínculos |
+| **409 Conflict** | E-mail duplicado, avaliação duplicada ou exclusão bloqueada por vínculos |
 | **500 Internal Server Error** | Erro inesperado no processamento da requisição |
 
 ## Como executar os testes
@@ -163,45 +165,64 @@ Especificação OpenAPI em JSON:
 
 Para montar um fluxo completo, cadastre os recursos nesta ordem:
 
-1. **Tutor** em `POST /api/tutores`
-2. **Pet** em `POST /api/pets`, informando o `tutorId` retornado no passo anterior
-3. **Serviço** em `POST /api/servicos`
-4. **Agendamento** em `POST /api/agendamentos`, informando `petId`, `tutorId` e `servicoId`
+1. **Prestador** em `POST /api/users` com `"role": "PROVIDER"`
+2. **Cliente** em `POST /api/users` com `"role": "CLIENT"`
+3. **Serviço** em `POST /api/services`, informando o `providerId` do prestador
+4. **Solicitação** em `POST /api/service-requests`, informando `serviceId` e `clientId`
+5. Conclua a solicitação com `PUT /api/service-requests/{id}` e `"status": "COMPLETED"`
+6. **Avaliação** em `POST /api/reviews`, informando `requestId` e o `reviewerId` do cliente
 
 Exemplo resumido:
 
 ```json
-POST /api/tutores
+POST /api/users
 {
-  "nome": "Ana Souza",
+  "fullName": "Carlos Lima",
+  "email": "carlos.lima@email.com",
+  "password": "senha123",
+  "phone": "11977776666",
+  "role": "PROVIDER"
+}
+
+POST /api/users
+{
+  "fullName": "Ana Souza",
   "email": "ana.souza@email.com",
-  "telefone": "11988887777"
+  "password": "senha123",
+  "phone": "11988887777",
+  "role": "CLIENT"
 }
 
-POST /api/pets
+POST /api/services
 {
-  "nome": "Thor",
-  "especie": "Cachorro",
-  "raca": "Labrador",
-  "idade": 4,
-  "tutorId": 1
+  "title": "Montagem de móveis",
+  "description": "Montagem de móveis residenciais e corporativos",
+  "price": 150.00,
+  "category": "Marcenaria",
+  "providerId": 1
 }
 
-POST /api/servicos
+POST /api/service-requests
 {
-  "nome": "Banho e tosa",
-  "descricao": "Banho completo com tosa higiênica",
-  "preco": 89.90,
-  "duracaoMinutos": 60
+  "serviceId": 1,
+  "clientId": 2,
+  "scheduledAt": "2026-09-20T14:30:00",
+  "notes": "Apartamento no 3º andar, sem elevador"
 }
 
-POST /api/agendamentos
+PUT /api/service-requests/1
 {
-  "petId": 1,
-  "tutorId": 1,
-  "servicoId": 1,
-  "dataHora": "2026-12-15T14:30:00",
-  "observacao": "Pet fica nervoso com secador",
-  "status": "AGENDADO"
+  "serviceId": 1,
+  "clientId": 2,
+  "status": "COMPLETED",
+  "scheduledAt": "2026-09-20T14:30:00"
+}
+
+POST /api/reviews
+{
+  "requestId": 1,
+  "reviewerId": 2,
+  "rating": 5,
+  "comment": "Serviço pontual e muito bem feito"
 }
 ```

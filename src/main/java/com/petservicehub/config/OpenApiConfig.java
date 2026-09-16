@@ -16,7 +16,7 @@ public class OpenApiConfig {
 				.info(new Info()
 						.title("PetServiceHub API")
 						.version("1.0.0")
-						.description("API para cadastro de tutores, pets, serviços e agendamentos do PetServiceHub")
+						.description("API da plataforma ServiceHub: clientes localizam prestadores, contratam serviços e registram avaliações")
 						.contact(new Contact()
 								.name("PetServiceHub")
 								.email("contato@petservicehub.com")));
