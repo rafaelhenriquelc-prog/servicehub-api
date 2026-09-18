@@ -14,11 +14,11 @@ public class OpenApiConfig {
 	public OpenAPI petServiceHubOpenAPI() {
 		return new OpenAPI()
 				.info(new Info()
-						.title("PetServiceHub API")
+						.title("ServiceHub API")
 						.version("1.0.0")
 						.description("API da plataforma ServiceHub: clientes localizam prestadores, contratam serviços e registram avaliações")
 						.contact(new Contact()
-								.name("PetServiceHub")
+								.name("ServiceHub")
 								.email("contato@petservicehub.com")));
 	}
 }

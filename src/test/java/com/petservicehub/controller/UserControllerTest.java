@@ -152,7 +152,7 @@ class UserControllerTest {
 	void deveExporDocumentacaoOpenApi() throws Exception {
 		mockMvc.perform(get("/v3/api-docs"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.info.title").value("PetServiceHub API"))
+				.andExpect(jsonPath("$.info.title").value("ServiceHub API"))
 				.andExpect(jsonPath("$.paths['/api/users']").exists())
 				.andExpect(jsonPath("$.paths['/api/services']").exists())
 				.andExpect(jsonPath("$.paths['/api/service-requests']").exists())
