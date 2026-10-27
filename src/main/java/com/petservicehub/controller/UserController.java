@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +25,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,18 +33,20 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
-@Tag(name = "Usuários", description = "CRUD de clientes e prestadores da plataforma")
+@SecurityRequirement(name = "bearer-jwt")
+@Tag(name = "Usuários", description = "Administração de usuários. O cadastro público fica em /api/auth/register")
 public class UserController {
 
 	private final UserService userService;
 
 	@PostMapping
-	@Operation(
-			summary = "Cadastrar um novo usuário",
-			description = "Cria um cliente (CLIENT) ou um prestador (PROVIDER). O e-mail deve ser único. A senha é armazenada somente como hash. Se active não for enviado, o cadastro fica ativo.")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Cadastrar um usuário (ADMIN)", description = "Permite ao ADMIN criar CLIENT, PROVIDER ou ADMIN. A senha é gravada com BCrypt e nunca é devolvida.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "201", description = "Usuário cadastrado com sucesso"),
 			@ApiResponse(responseCode = "400", description = "Dados inválidos"),
+			@ApiResponse(responseCode = "401", description = "Não autenticado"),
+			@ApiResponse(responseCode = "403", description = "Acesso negado"),
 			@ApiResponse(responseCode = "409", description = "E-mail já cadastrado")
 	})
 	public ResponseEntity<UserResponse> criar(@Valid @RequestBody UserRequest request) {
@@ -55,12 +59,11 @@ public class UserController {
 	}
 
 	@GetMapping
-	@Operation(
-			summary = "Listar usuários",
-			description = "Retorna os usuários cadastrados. Os filtros opcionais permitem restringir por perfil (CLIENT ou PROVIDER) e por status ativo.")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Listar usuários", description = "Somente ADMIN lista todos os usuários da plataforma.")
 	@ApiResponse(responseCode = "200", description = "Lista de usuários retornada com sucesso")
 	public ResponseEntity<List<UserResponse>> listar(
-			@Parameter(description = "Perfil do usuário: CLIENT ou PROVIDER")
+			@Parameter(description = "Perfil do usuário: ADMIN, CLIENT ou PROVIDER")
 			@RequestParam(required = false) UserRole role,
 			@Parameter(description = "Quando informado, filtra usuários ativos (true) ou inativos (false)")
 			@RequestParam(required = false) Boolean active) {
@@ -68,11 +71,11 @@ public class UserController {
 	}
 
 	@GetMapping("/{id}")
-	@Operation(
-			summary = "Buscar usuário por id",
-			description = "Localiza um usuário específico pelo identificador único. A senha nunca é devolvida.")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Buscar usuário por id", description = "ADMIN consulta qualquer usuário. Os demais consultam apenas o próprio cadastro. A senha nunca é devolvida.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Usuário encontrado"),
+			@ApiResponse(responseCode = "403", description = "Acesso a dados de outro usuário"),
 			@ApiResponse(responseCode = "404", description = "Usuário não encontrado")
 	})
 	public ResponseEntity<UserResponse> buscarPorId(
@@ -82,12 +85,12 @@ public class UserController {
 	}
 
 	@PutMapping("/{id}")
-	@Operation(
-			summary = "Atualizar um usuário",
-			description = "Substitui os dados do usuário informado. O e-mail continua precisando ser único e a nova senha é gravada como hash.")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Atualizar um usuário", description = "ADMIN atualiza qualquer cadastro. Os demais atualizam apenas o próprio, sem mudar o papel.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Usuário atualizado com sucesso"),
 			@ApiResponse(responseCode = "400", description = "Dados inválidos"),
+			@ApiResponse(responseCode = "403", description = "Acesso negado"),
 			@ApiResponse(responseCode = "404", description = "Usuário não encontrado"),
 			@ApiResponse(responseCode = "409", description = "E-mail já cadastrado")
 	})
@@ -99,11 +102,11 @@ public class UserController {
 	}
 
 	@DeleteMapping("/{id}")
-	@Operation(
-			summary = "Excluir um usuário",
-			description = "Remove o usuário do cadastro. A exclusão é recusada quando existem serviços, solicitações ou avaliações vinculadas.")
+	@PreAuthorize("hasRole('ADMIN')")
+	@Operation(summary = "Excluir um usuário", description = "Somente ADMIN remove um usuário. A exclusão é recusada quando existem vínculos.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "204", description = "Usuário excluído com sucesso"),
+			@ApiResponse(responseCode = "403", description = "Acesso negado"),
 			@ApiResponse(responseCode = "404", description = "Usuário não encontrado"),
 			@ApiResponse(responseCode = "409", description = "Usuário possui vínculos que impedem a exclusão")
 	})

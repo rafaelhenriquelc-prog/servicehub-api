@@ -7,6 +7,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -16,6 +19,31 @@ import jakarta.validation.ConstraintViolationException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+	@ExceptionHandler(BadCredentialsException.class)
+	public ProblemDetail handleBadCredentials(BadCredentialsException exception) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Credenciais inválidas");
+		problem.setTitle("Não autenticado");
+		return problem;
+	}
+
+	@ExceptionHandler(AuthenticationException.class)
+	public ProblemDetail handleAuthentication(AuthenticationException exception) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+				HttpStatus.UNAUTHORIZED,
+				"Token ausente, inválido, expirado ou usuário inativo");
+		problem.setTitle("Não autenticado");
+		return problem;
+	}
+
+	@ExceptionHandler(AccessDeniedException.class)
+	public ProblemDetail handleAccessDenied(AccessDeniedException exception) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+				HttpStatus.FORBIDDEN,
+				exception.getMessage() == null ? "Você não tem permissão para acessar este recurso" : exception.getMessage());
+		problem.setTitle("Acesso negado");
+		return problem;
+	}
 
 	@ExceptionHandler(ResourceNotFoundException.class)
 	public ProblemDetail handleNotFound(ResourceNotFoundException exception) {

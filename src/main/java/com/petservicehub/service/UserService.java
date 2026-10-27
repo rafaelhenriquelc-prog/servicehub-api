@@ -1,12 +1,16 @@
 package com.petservicehub.service;
 
 import java.util.List;
+import java.util.Locale;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.petservicehub.dto.EntityMapper;
+import com.petservicehub.dto.RegisterRequest;
 import com.petservicehub.dto.UserRequest;
 import com.petservicehub.dto.UserResponse;
 import com.petservicehub.exception.BusinessException;
@@ -17,7 +21,8 @@ import com.petservicehub.repository.OfferedServiceRepository;
 import com.petservicehub.repository.ReviewRepository;
 import com.petservicehub.repository.ServiceRequestRepository;
 import com.petservicehub.repository.UserRepository;
-import com.petservicehub.util.PasswordHasher;
+import com.petservicehub.security.AppUserDetails;
+import com.petservicehub.security.SecurityUtils;
 
 import lombok.RequiredArgsConstructor;
 
@@ -29,14 +34,39 @@ public class UserService {
 	private final OfferedServiceRepository offeredServiceRepository;
 	private final ServiceRequestRepository serviceRequestRepository;
 	private final ReviewRepository reviewRepository;
+	private final PasswordEncoder passwordEncoder;
+
+	@Transactional
+	public UserResponse registrar(RegisterRequest request) {
+		if (request.role() == UserRole.ADMIN) {
+			throw new BusinessException(HttpStatus.BAD_REQUEST, "Não é permitido cadastrar um usuário ADMIN pelo registro público");
+		}
+		if (request.role() != UserRole.CLIENT && request.role() != UserRole.PROVIDER) {
+			throw new BusinessException(HttpStatus.BAD_REQUEST, "O perfil deve ser CLIENT ou PROVIDER");
+		}
+		String email = normalizeEmail(request.email());
+		validarEmailUnico(email, null);
+		User user = User.builder()
+				.fullName(request.fullName())
+				.email(email)
+				.passwordHash(passwordEncoder.encode(request.password()))
+				.phone(request.phone())
+				.bio(request.bio())
+				.avatarUrl(request.avatarUrl())
+				.role(request.role())
+				.active(true)
+				.build();
+		return EntityMapper.toResponse(userRepository.save(user));
+	}
 
 	@Transactional
 	public UserResponse criar(UserRequest request) {
-		validarEmailUnico(request.email(), null);
+		String email = normalizeEmail(request.email());
+		validarEmailUnico(email, null);
 		User user = User.builder()
 				.fullName(request.fullName())
-				.email(request.email())
-				.passwordHash(PasswordHasher.hash(request.password()))
+				.email(email)
+				.passwordHash(passwordEncoder.encode(request.password()))
 				.phone(request.phone())
 				.bio(request.bio())
 				.avatarUrl(request.avatarUrl())
@@ -63,22 +93,30 @@ public class UserService {
 
 	@Transactional(readOnly = true)
 	public UserResponse buscarPorId(Long id) {
+		garantirAdminOuProprio(id);
 		return EntityMapper.toResponse(buscarEntidade(id));
 	}
 
 	@Transactional
 	public UserResponse atualizar(Long id, UserRequest request) {
+		garantirAdminOuProprio(id);
 		User user = buscarEntidade(id);
-		validarEmailUnico(request.email(), id);
+		AppUserDetails current = SecurityUtils.currentUser();
+		String email = normalizeEmail(request.email());
+		validarEmailUnico(email, id);
 		user.setFullName(request.fullName());
-		user.setEmail(request.email());
-		user.setPasswordHash(PasswordHasher.hash(request.password()));
+		user.setEmail(email);
+		user.setPasswordHash(passwordEncoder.encode(request.password()));
 		user.setPhone(request.phone());
 		user.setBio(request.bio());
 		user.setAvatarUrl(request.avatarUrl());
-		user.setRole(request.role());
-		if (request.active() != null) {
-			user.setActive(request.active());
+		if (current.getRole() == UserRole.ADMIN) {
+			user.setRole(request.role());
+			if (request.active() != null) {
+				user.setActive(request.active());
+			}
+		} else if (request.role() != null && request.role() != user.getRole()) {
+			throw new AccessDeniedException("Você não pode alterar o próprio perfil");
 		}
 		return EntityMapper.toResponse(userRepository.save(user));
 	}
@@ -104,12 +142,28 @@ public class UserService {
 				.orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado com id " + id));
 	}
 
+	@Transactional(readOnly = true)
+	public User usuarioAutenticado() {
+		return buscarEntidade(SecurityUtils.currentUser().getId());
+	}
+
+	public static String normalizeEmail(String email) {
+		return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
+	}
+
 	private void validarEmailUnico(String email, Long idAtual) {
 		boolean emailEmUso = idAtual == null
 				? userRepository.existsByEmailIgnoreCase(email)
 				: userRepository.existsByEmailIgnoreCaseAndIdNot(email, idAtual);
 		if (emailEmUso) {
 			throw new BusinessException(HttpStatus.CONFLICT, "Já existe um usuário cadastrado com o e-mail " + email);
+		}
+	}
+
+	private void garantirAdminOuProprio(Long id) {
+		AppUserDetails current = SecurityUtils.currentUser();
+		if (current.getRole() != UserRole.ADMIN && !current.getId().equals(id)) {
+			throw new AccessDeniedException("Você não pode acessar dados de outro usuário");
 		}
 	}
 }

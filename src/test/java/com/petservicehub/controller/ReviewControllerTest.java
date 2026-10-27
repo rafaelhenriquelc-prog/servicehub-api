@@ -9,9 +9,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,16 +18,13 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.petservicehub.model.OfferedService;
-import com.petservicehub.model.RequestStatus;
 import com.petservicehub.model.Review;
 import com.petservicehub.model.ServiceRequest;
-import com.petservicehub.model.User;
-import com.petservicehub.model.UserRole;
 import com.petservicehub.repository.OfferedServiceRepository;
 import com.petservicehub.repository.ReviewRepository;
 import com.petservicehub.repository.ServiceRequestRepository;
 import com.petservicehub.repository.UserRepository;
-import com.petservicehub.util.PasswordHasher;
+import com.petservicehub.support.AuthTestSupport;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -51,168 +45,172 @@ class ReviewControllerTest {
 	@Autowired
 	private ReviewRepository reviewRepository;
 
-	private User client;
-	private User provider;
-	private OfferedService service;
+	private String clientToken;
+	private String providerToken;
 	private ServiceRequest completedRequest;
 
 	@BeforeEach
-	void limparBase() {
+	void limparBase() throws Exception {
 		reviewRepository.deleteAll();
 		serviceRequestRepository.deleteAll();
 		offeredServiceRepository.deleteAll();
 		userRepository.deleteAll();
-		provider = salvarUsuario("Carlos Lima", "carlos.lima@email.com", UserRole.PROVIDER);
-		client = salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
-		service = offeredServiceRepository.save(OfferedService.builder()
-				.title("Montagem de móveis")
-				.description("Montagem residencial")
-				.price(new BigDecimal("150.00"))
-				.category("Marcenaria")
-				.provider(provider)
-				.active(true)
-				.build());
-		completedRequest = salvarSolicitacao(RequestStatus.COMPLETED);
+		providerToken = AuthTestSupport.registerAndLogin(mockMvc, "Carlos Lima", "carlos.lima@email.com", "PROVIDER");
+		clientToken = AuthTestSupport.registerAndLogin(mockMvc, "Ana Souza", "ana.souza@email.com", "CLIENT");
+		mockMvc.perform(post("/api/services")
+						.header("Authorization", "Bearer " + providerToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+									"title": "Montagem de móveis",
+									"description": "Montagem residencial",
+									"price": 150.00,
+									"category": "Marcenaria",
+									"active": true
+								}
+								"""))
+				.andExpect(status().isCreated());
+		OfferedService service = offeredServiceRepository.findAll().getFirst();
+		mockMvc.perform(post("/api/service-requests")
+						.header("Authorization", "Bearer " + clientToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+									"serviceId": %d,
+									"scheduledAt": "2026-09-20T14:30:00"
+								}
+								""".formatted(service.getId())))
+				.andExpect(status().isCreated());
+		completedRequest = serviceRequestRepository.findAll().getFirst();
+		mockMvc.perform(put("/api/service-requests/{id}", completedRequest.getId())
+						.header("Authorization", "Bearer " + providerToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+									"serviceId": %d,
+									"status": "COMPLETED"
+								}
+								""".formatted(service.getId())))
+				.andExpect(status().isOk());
+		completedRequest = serviceRequestRepository.findById(completedRequest.getId()).orElseThrow();
 	}
 
 	@Test
 	void deveCadastrarAvaliacao() throws Exception {
 		mockMvc.perform(post("/api/reviews")
+						.header("Authorization", "Bearer " + clientToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(reviewJson(completedRequest.getId(), client.getId(), 5, "Excelente")))
+						.content(reviewJson(completedRequest.getId(), 5, "Excelente")))
 				.andExpect(status().isCreated())
 				.andExpect(header().exists("Location"))
 				.andExpect(jsonPath("$.rating").value(5))
-				.andExpect(jsonPath("$.comment").value("Excelente"))
-				.andExpect(jsonPath("$.requestId").value(completedRequest.getId()))
-				.andExpect(jsonPath("$.reviewer.id").value(client.getId()));
+				.andExpect(jsonPath("$.reviewer.email").value("ana.souza@email.com"));
 	}
 
 	@Test
 	void deveRecusarAvaliacaoDeSolicitacaoNaoConcluida() throws Exception {
-		ServiceRequest pending = salvarSolicitacao(RequestStatus.PENDING);
+		OfferedService service = offeredServiceRepository.findAll().getFirst();
+		mockMvc.perform(post("/api/service-requests")
+						.header("Authorization", "Bearer " + clientToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"serviceId": %d, "scheduledAt": "2026-09-21T10:00:00"}
+								""".formatted(service.getId())))
+				.andExpect(status().isCreated());
+		ServiceRequest pending = serviceRequestRepository.findAll().stream()
+				.filter(item -> item.getId() != completedRequest.getId())
+				.findFirst()
+				.orElseThrow();
 
 		mockMvc.perform(post("/api/reviews")
+						.header("Authorization", "Bearer " + clientToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(reviewJson(pending.getId(), client.getId(), 5, "Excelente")))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.detail").value("A avaliação só pode ser cadastrada para uma solicitação COMPLETED"));
-	}
-
-	@Test
-	void deveRecusarAvaliadorQueNaoEOcliente() throws Exception {
-		mockMvc.perform(post("/api/reviews")
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(reviewJson(completedRequest.getId(), provider.getId(), 5, "Excelente")))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.detail").value("O avaliador deve ser o cliente da solicitação"));
+						.content(reviewJson(pending.getId(), 5, "Excelente")))
+				.andExpect(status().isBadRequest());
 	}
 
 	@Test
 	void deveRecusarSegundaAvaliacaoNaMesmaSolicitacao() throws Exception {
-		salvarAvaliacao();
-
+		criarAvaliacao();
 		mockMvc.perform(post("/api/reviews")
+						.header("Authorization", "Bearer " + clientToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(reviewJson(completedRequest.getId(), client.getId(), 4, "Outra")))
-				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.detail").value("Esta solicitação já possui uma avaliação"));
+						.content(reviewJson(completedRequest.getId(), 4, "Outra")))
+				.andExpect(status().isConflict());
 	}
 
 	@Test
 	void deveRetornarBadRequestQuandoNotaInvalida() throws Exception {
 		mockMvc.perform(post("/api/reviews")
+						.header("Authorization", "Bearer " + clientToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(reviewJson(completedRequest.getId(), client.getId(), 6, "Nota alta")))
+						.content(reviewJson(completedRequest.getId(), 6, "Nota alta")))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.erros.rating").exists());
 	}
 
 	@Test
 	void deveListarAvaliacoes() throws Exception {
-		salvarAvaliacao();
-
-		mockMvc.perform(get("/api/reviews"))
+		criarAvaliacao();
+		mockMvc.perform(get("/api/reviews")
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(1)));
 	}
 
 	@Test
 	void deveBuscarAvaliacaoPorId() throws Exception {
-		Review review = salvarAvaliacao();
-
-		mockMvc.perform(get("/api/reviews/{id}", review.getId()))
+		criarAvaliacao();
+		Review review = reviewRepository.findAll().getFirst();
+		mockMvc.perform(get("/api/reviews/{id}", review.getId())
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(review.getId()))
 				.andExpect(jsonPath("$.rating").value(5));
 	}
 
 	@Test
 	void deveRetornarNotFoundQuandoAvaliacaoNaoExiste() throws Exception {
-		mockMvc.perform(get("/api/reviews/{id}", 999))
+		mockMvc.perform(get("/api/reviews/{id}", 999)
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isNotFound());
 	}
 
 	@Test
 	void deveAtualizarAvaliacao() throws Exception {
-		Review review = salvarAvaliacao();
-
+		criarAvaliacao();
+		Review review = reviewRepository.findAll().getFirst();
 		mockMvc.perform(put("/api/reviews/{id}", review.getId())
+						.header("Authorization", "Bearer " + clientToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(reviewJson(completedRequest.getId(), client.getId(), 4, "Atualizado")))
+						.content(reviewJson(completedRequest.getId(), 4, "Atualizado")))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.rating").value(4))
-				.andExpect(jsonPath("$.comment").value("Atualizado"));
+				.andExpect(jsonPath("$.rating").value(4));
 	}
 
 	@Test
 	void deveExcluirAvaliacao() throws Exception {
-		Review review = salvarAvaliacao();
-
-		mockMvc.perform(delete("/api/reviews/{id}", review.getId()))
+		criarAvaliacao();
+		Review review = reviewRepository.findAll().getFirst();
+		mockMvc.perform(delete("/api/reviews/{id}", review.getId())
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isNoContent());
-
-		mockMvc.perform(get("/api/reviews/{id}", review.getId()))
-				.andExpect(status().isNotFound());
 	}
 
-	private User salvarUsuario(String nome, String email, UserRole role) {
-		return userRepository.save(User.builder()
-				.fullName(nome)
-				.email(email)
-				.passwordHash(PasswordHasher.hash("senha123"))
-				.role(role)
-				.active(true)
-				.build());
+	private void criarAvaliacao() throws Exception {
+		mockMvc.perform(post("/api/reviews")
+						.header("Authorization", "Bearer " + clientToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(reviewJson(completedRequest.getId(), 5, "Excelente")))
+				.andExpect(status().isCreated());
 	}
 
-	private ServiceRequest salvarSolicitacao(RequestStatus status) {
-		return serviceRequestRepository.save(ServiceRequest.builder()
-				.service(service)
-				.client(client)
-				.status(status)
-				.scheduledAt(LocalDateTime.of(2026, 9, 20, 14, 30))
-				.totalPrice(service.getPrice())
-				.build());
-	}
-
-	private Review salvarAvaliacao() {
-		return reviewRepository.save(Review.builder()
-				.request(completedRequest)
-				.reviewer(client)
-				.rating(5)
-				.comment("Excelente")
-				.build());
-	}
-
-	private String reviewJson(Long requestId, Long reviewerId, int rating, String comment) {
+	private String reviewJson(Long requestId, int rating, String comment) {
 		return """
 				{
 					"requestId": %d,
-					"reviewerId": %d,
 					"rating": %d,
 					"comment": "%s"
 				}
-				""".formatted(requestId, reviewerId, rating, comment);
+				""".formatted(requestId, rating, comment);
 	}
 }

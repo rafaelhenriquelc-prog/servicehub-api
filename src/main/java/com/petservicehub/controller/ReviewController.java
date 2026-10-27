@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +24,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -30,19 +32,21 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/reviews")
 @RequiredArgsConstructor
-@Tag(name = "Avaliações", description = "CRUD de avaliações de solicitações concluídas")
+@SecurityRequirement(name = "bearer-jwt")
+@Tag(name = "Avaliações", description = "Avaliações autenticadas. O avaliador vem do JWT.")
 public class ReviewController {
 
 	private final ReviewService reviewService;
 
 	@PostMapping
+	@PreAuthorize("hasRole('CLIENT')")
 	@Operation(
 			summary = "Cadastrar uma nova avaliação",
-			description = "Registra a avaliação de uma solicitação COMPLETED. O avaliador precisa ser o cliente da solicitação e cada solicitação aceita somente uma avaliação. A nota deve estar entre 1 e 5.")
+			description = "O CLIENT autenticado avalia somente a própria solicitação COMPLETED. O reviewerId não é aceito no corpo.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "201", description = "Avaliação cadastrada com sucesso"),
-			@ApiResponse(responseCode = "400", description = "Dados inválidos, solicitação não concluída ou avaliador incompatível"),
-			@ApiResponse(responseCode = "404", description = "Solicitação ou avaliador não encontrado"),
+			@ApiResponse(responseCode = "400", description = "Solicitação não concluída"),
+			@ApiResponse(responseCode = "403", description = "Avaliação de solicitação de outro cliente"),
 			@ApiResponse(responseCode = "409", description = "A solicitação já possui uma avaliação")
 	})
 	public ResponseEntity<ReviewResponse> criar(@Valid @RequestBody ReviewRequest request) {
@@ -55,24 +59,23 @@ public class ReviewController {
 	}
 
 	@GetMapping
-	@Operation(
-			summary = "Listar avaliações",
-			description = "Retorna as avaliações cadastradas. Os filtros opcionais permitem consultar por avaliador e por solicitação.")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Listar avaliações", description = "CLIENT vê as próprias. PROVIDER vê as dos seus serviços. ADMIN vê todas.")
 	@ApiResponse(responseCode = "200", description = "Lista de avaliações retornada com sucesso")
 	public ResponseEntity<List<ReviewResponse>> listar(
-			@Parameter(description = "Identificador único do cliente avaliador. Quando informado, retorna somente as avaliações desse usuário")
+			@Parameter(description = "Identificador do avaliador (respeitado somente para ADMIN)")
 			@RequestParam(required = false) Long reviewerId,
-			@Parameter(description = "Identificador único da solicitação. Quando informado, retorna somente a avaliação dessa solicitação")
+			@Parameter(description = "Identificador da solicitação")
 			@RequestParam(required = false) Long requestId) {
 		return ResponseEntity.ok(reviewService.listar(reviewerId, requestId));
 	}
 
 	@GetMapping("/{id}")
-	@Operation(
-			summary = "Buscar avaliação por id",
-			description = "Localiza uma avaliação específica pelo identificador único, incluindo nota, comentário, avaliador e a solicitação correspondente.")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Buscar avaliação por id", description = "Acesso restrito ao avaliador, ao prestador do serviço ou ao ADMIN.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Avaliação encontrada"),
+			@ApiResponse(responseCode = "403", description = "Avaliação de outro usuário"),
 			@ApiResponse(responseCode = "404", description = "Avaliação não encontrada")
 	})
 	public ResponseEntity<ReviewResponse> buscarPorId(
@@ -82,14 +85,12 @@ public class ReviewController {
 	}
 
 	@PutMapping("/{id}")
-	@Operation(
-			summary = "Atualizar uma avaliação",
-			description = "Atualiza a solicitação, o avaliador, a nota e o comentário. As regras de solicitação COMPLETED, avaliador igual ao cliente e avaliação única por solicitação continuam valendo.")
+	@PreAuthorize("hasAnyRole('CLIENT', 'ADMIN')")
+	@Operation(summary = "Atualizar uma avaliação", description = "CLIENT atualiza somente a própria avaliação.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Avaliação atualizada com sucesso"),
-			@ApiResponse(responseCode = "400", description = "Dados inválidos, solicitação não concluída ou avaliador incompatível"),
-			@ApiResponse(responseCode = "404", description = "Avaliação, solicitação ou avaliador não encontrado"),
-			@ApiResponse(responseCode = "409", description = "A solicitação já possui uma avaliação")
+			@ApiResponse(responseCode = "403", description = "Avaliação de outro usuário"),
+			@ApiResponse(responseCode = "404", description = "Avaliação não encontrada")
 	})
 	public ResponseEntity<ReviewResponse> atualizar(
 			@Parameter(description = "Identificador único da avaliação que será atualizada")
@@ -99,11 +100,11 @@ public class ReviewController {
 	}
 
 	@DeleteMapping("/{id}")
-	@Operation(
-			summary = "Excluir uma avaliação",
-			description = "Remove a avaliação do cadastro a partir do identificador informado.")
+	@PreAuthorize("hasAnyRole('CLIENT', 'ADMIN')")
+	@Operation(summary = "Excluir uma avaliação", description = "CLIENT exclui somente a própria avaliação.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "204", description = "Avaliação excluída com sucesso"),
+			@ApiResponse(responseCode = "403", description = "Avaliação de outro usuário"),
 			@ApiResponse(responseCode = "404", description = "Avaliação não encontrada")
 	})
 	public ResponseEntity<Void> excluir(

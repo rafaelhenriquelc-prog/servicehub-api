@@ -18,7 +18,8 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 	@Query("""
 			select r from Review r
 			join fetch r.request req
-			join fetch req.service
+			join fetch req.service s
+			join fetch s.provider
 			join fetch req.client
 			join fetch r.reviewer
 			where r.id = :id
@@ -28,13 +29,16 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 	@Query("""
 			select r from Review r
 			join fetch r.request req
-			join fetch req.service
+			join fetch req.service s
+			join fetch s.provider
 			join fetch req.client
 			join fetch r.reviewer
 			where (:reviewerId is null or r.reviewer.id = :reviewerId)
 			and (:requestId is null or r.request.id = :requestId)
+			and (:providerId is null or s.provider.id = :providerId)
 			""")
 	List<Review> findAllWithRelations(
 			@Param("reviewerId") Long reviewerId,
-			@Param("requestId") Long requestId);
+			@Param("requestId") Long requestId,
+			@Param("providerId") Long providerId);
 }

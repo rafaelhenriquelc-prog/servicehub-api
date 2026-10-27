@@ -6,18 +6,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 
 import com.petservicehub.dto.OfferedServiceRequest;
 import com.petservicehub.dto.OfferedServiceResponse;
-import com.petservicehub.exception.BusinessException;
 import com.petservicehub.model.OfferedService;
 import com.petservicehub.model.User;
 import com.petservicehub.model.UserRole;
@@ -41,21 +39,19 @@ class OfferedServiceServiceTest {
 
 	@Test
 	void deveRecusarPrestadorQueNaoEProvider() {
-		when(userService.buscarEntidade(1L)).thenReturn(usuario(1L, UserRole.CLIENT, true));
+		when(userService.usuarioAutenticado()).thenReturn(usuario(1L, UserRole.CLIENT, true));
 
 		OfferedServiceRequest request = new OfferedServiceRequest(
-				"Montagem", "Descrição", new BigDecimal("100.00"), "Marcenaria", 1L, true);
+				"Montagem", "Descrição", new BigDecimal("100.00"), "Marcenaria", true);
 
 		assertThatThrownBy(() -> offeredServiceService.criar(request))
-				.isInstanceOf(BusinessException.class)
-				.hasMessage("Somente um usuário PROVIDER pode ser associado como prestador")
-				.extracting(ex -> ((BusinessException) ex).getStatus())
-				.isEqualTo(HttpStatus.BAD_REQUEST);
+				.isInstanceOf(AccessDeniedException.class)
+				.hasMessage("Somente um PROVIDER pode criar serviços");
 	}
 
 	@Test
 	void deveCadastrarServicoParaProviderAtivo() {
-		when(userService.buscarEntidade(2L)).thenReturn(usuario(2L, UserRole.PROVIDER, true));
+		when(userService.usuarioAutenticado()).thenReturn(usuario(2L, UserRole.PROVIDER, true));
 		when(offeredServiceRepository.save(any(OfferedService.class))).thenAnswer(invocation -> {
 			OfferedService salvo = invocation.getArgument(0);
 			salvo.setId(10L);
@@ -63,7 +59,7 @@ class OfferedServiceServiceTest {
 		});
 
 		OfferedServiceResponse response = offeredServiceService.criar(new OfferedServiceRequest(
-				"Montagem", "Descrição", new BigDecimal("100.00"), "Marcenaria", 2L, null));
+				"Montagem", "Descrição", new BigDecimal("100.00"), "Marcenaria", null));
 
 		assertThat(response.id()).isEqualTo(10L);
 		assertThat(response.active()).isTrue();

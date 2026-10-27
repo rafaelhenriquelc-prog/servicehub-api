@@ -6,16 +6,12 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-@Schema(description = "Dados para cadastro ou atualização de uma avaliação")
+@Schema(description = "Dados para cadastro ou atualização de uma avaliação. O avaliador é o usuário autenticado.")
 public record ReviewRequest(
 
 		@NotNull(message = "A solicitação é obrigatória")
 		@Schema(description = "Identificador da solicitação concluída", example = "1")
 		Long requestId,
-
-		@NotNull(message = "O avaliador é obrigatório")
-		@Schema(description = "Identificador do cliente que avalia", example = "1")
-		Long reviewerId,
 
 		@NotNull(message = "A nota é obrigatória")
 		@Min(value = 1, message = "A nota mínima é 1")

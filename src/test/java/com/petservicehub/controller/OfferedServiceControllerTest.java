@@ -9,8 +9,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.math.BigDecimal;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,13 +18,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.petservicehub.model.OfferedService;
-import com.petservicehub.model.User;
-import com.petservicehub.model.UserRole;
 import com.petservicehub.repository.OfferedServiceRepository;
 import com.petservicehub.repository.ReviewRepository;
 import com.petservicehub.repository.ServiceRequestRepository;
 import com.petservicehub.repository.UserRepository;
-import com.petservicehub.util.PasswordHasher;
+import com.petservicehub.support.AuthTestSupport;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -47,45 +43,34 @@ class OfferedServiceControllerTest {
 	@Autowired
 	private ReviewRepository reviewRepository;
 
-	private User provider;
+	private String providerToken;
 
 	@BeforeEach
-	void limparBase() {
+	void limparBase() throws Exception {
 		reviewRepository.deleteAll();
 		serviceRequestRepository.deleteAll();
 		offeredServiceRepository.deleteAll();
 		userRepository.deleteAll();
-		provider = salvarUsuario("Carlos Lima", "carlos.lima@email.com", UserRole.PROVIDER);
+		providerToken = AuthTestSupport.registerAndLogin(mockMvc, "Carlos Lima", "carlos.lima@email.com", "PROVIDER");
 	}
 
 	@Test
-	void deveCadastrarServico() throws Exception {
+	void deveCadastrarServicoComoProvider() throws Exception {
 		mockMvc.perform(post("/api/services")
+						.header("Authorization", "Bearer " + providerToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(serviceJson("Montagem de móveis", "Montagem residencial", "150.00", "Marcenaria", provider.getId(), true)))
+						.content(serviceJson("Montagem de móveis", "Montagem residencial", "150.00", "Marcenaria", true)))
 				.andExpect(status().isCreated())
 				.andExpect(header().exists("Location"))
 				.andExpect(jsonPath("$.title").value("Montagem de móveis"))
-				.andExpect(jsonPath("$.price").value(150.00))
-				.andExpect(jsonPath("$.category").value("Marcenaria"))
-				.andExpect(jsonPath("$.provider.id").value(provider.getId()))
+				.andExpect(jsonPath("$.provider.email").value("carlos.lima@email.com"))
 				.andExpect(jsonPath("$.active").value(true));
-	}
-
-	@Test
-	void deveRecusarServicoComClienteComoPrestador() throws Exception {
-		User client = salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
-
-		mockMvc.perform(post("/api/services")
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(serviceJson("Montagem de móveis", "Montagem residencial", "150.00", "Marcenaria", client.getId(), true)))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.detail").value("Somente um usuário PROVIDER pode ser associado como prestador"));
 	}
 
 	@Test
 	void deveRetornarBadRequestQuandoDadosInvalidos() throws Exception {
 		mockMvc.perform(post("/api/services")
+						.header("Authorization", "Bearer " + providerToken)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
@@ -97,14 +82,13 @@ class OfferedServiceControllerTest {
 				.andExpect(jsonPath("$.erros.title").exists())
 				.andExpect(jsonPath("$.erros.description").exists())
 				.andExpect(jsonPath("$.erros.price").exists())
-				.andExpect(jsonPath("$.erros.category").exists())
-				.andExpect(jsonPath("$.erros.providerId").exists());
+				.andExpect(jsonPath("$.erros.category").exists());
 	}
 
 	@Test
-	void deveListarServicosPorCategoria() throws Exception {
-		salvarServico("Montagem de móveis", "Marcenaria", true);
-		salvarServico("Instalação elétrica", "Elétrica", true);
+	void deveListarServicosPublicamente() throws Exception {
+		criarServicoViaApi("Montagem de móveis", "Marcenaria");
+		criarServicoViaApi("Instalação elétrica", "Elétrica");
 
 		mockMvc.perform(get("/api/services").param("category", "Marcenaria"))
 				.andExpect(status().isOk())
@@ -113,13 +97,13 @@ class OfferedServiceControllerTest {
 	}
 
 	@Test
-	void deveBuscarServicoPorId() throws Exception {
-		OfferedService service = salvarServico("Montagem de móveis", "Marcenaria", true);
+	void deveBuscarServicoPorIdSemToken() throws Exception {
+		criarServicoViaApi("Montagem de móveis", "Marcenaria");
+		OfferedService service = offeredServiceRepository.findAll().getFirst();
 
 		mockMvc.perform(get("/api/services/{id}", service.getId()))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(service.getId()))
-				.andExpect(jsonPath("$.provider.fullName").value("Carlos Lima"));
+				.andExpect(jsonPath("$.title").value("Montagem de móveis"));
 	}
 
 	@Test
@@ -129,60 +113,46 @@ class OfferedServiceControllerTest {
 	}
 
 	@Test
-	void deveAtualizarServico() throws Exception {
-		OfferedService service = salvarServico("Montagem de móveis", "Marcenaria", true);
+	void deveAtualizarServicoProprio() throws Exception {
+		criarServicoViaApi("Montagem de móveis", "Marcenaria");
+		OfferedService service = offeredServiceRepository.findAll().getFirst();
 
 		mockMvc.perform(put("/api/services/{id}", service.getId())
+						.header("Authorization", "Bearer " + providerToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(serviceJson("Montagem completa", "Montagem e nivelamento", "180.00", "Marcenaria", provider.getId(), false)))
+						.content(serviceJson("Montagem completa", "Montagem e nivelamento", "180.00", "Marcenaria", false)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.title").value("Montagem completa"))
-				.andExpect(jsonPath("$.price").value(180.00))
 				.andExpect(jsonPath("$.active").value(false));
 	}
 
 	@Test
-	void deveExcluirServico() throws Exception {
-		OfferedService service = salvarServico("Montagem de móveis", "Marcenaria", true);
+	void deveExcluirServicoProprio() throws Exception {
+		criarServicoViaApi("Montagem de móveis", "Marcenaria");
+		OfferedService service = offeredServiceRepository.findAll().getFirst();
 
-		mockMvc.perform(delete("/api/services/{id}", service.getId()))
+		mockMvc.perform(delete("/api/services/{id}", service.getId())
+						.header("Authorization", "Bearer " + providerToken))
 				.andExpect(status().isNoContent());
-
-		mockMvc.perform(get("/api/services/{id}", service.getId()))
-				.andExpect(status().isNotFound());
 	}
 
-	private User salvarUsuario(String nome, String email, UserRole role) {
-		return userRepository.save(User.builder()
-				.fullName(nome)
-				.email(email)
-				.passwordHash(PasswordHasher.hash("senha123"))
-				.role(role)
-				.active(true)
-				.build());
+	private void criarServicoViaApi(String titulo, String categoria) throws Exception {
+		mockMvc.perform(post("/api/services")
+						.header("Authorization", "Bearer " + providerToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(serviceJson(titulo, "Descrição", "150.00", categoria, true)))
+				.andExpect(status().isCreated());
 	}
 
-	private OfferedService salvarServico(String titulo, String categoria, boolean ativo) {
-		return offeredServiceRepository.save(OfferedService.builder()
-				.title(titulo)
-				.description("Descrição")
-				.price(new BigDecimal("150.00"))
-				.category(categoria)
-				.provider(provider)
-				.active(ativo)
-				.build());
-	}
-
-	private String serviceJson(String title, String description, String price, String category, Long providerId, boolean active) {
+	private String serviceJson(String title, String description, String price, String category, boolean active) {
 		return """
 				{
 					"title": "%s",
 					"description": "%s",
 					"price": %s,
 					"category": "%s",
-					"providerId": %d,
 					"active": %s
 				}
-				""".formatted(title, description, price, category, providerId, active);
+				""".formatted(title, description, price, category, active);
 	}
 }

@@ -8,18 +8,14 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-@Schema(description = "Dados para cadastro ou atualização de uma solicitação de serviço")
+@Schema(description = "Dados para cadastro ou atualização de uma solicitação. O cliente é o usuário autenticado.")
 public record ServiceRequestInput(
 
 		@NotNull(message = "O serviço é obrigatório")
 		@Schema(description = "Identificador do serviço contratado", example = "1")
 		Long serviceId,
 
-		@NotNull(message = "O cliente é obrigatório")
-		@Schema(description = "Identificador do usuário cliente (CLIENT)", example = "1")
-		Long clientId,
-
-		@Schema(description = "Status da solicitação. Se omitido no cadastro, assume PENDING", example = "PENDING")
+		@Schema(description = "Status da solicitação. No cadastro, se omitido, assume PENDING", example = "PENDING")
 		RequestStatus status,
 
 		@Schema(description = "Data e hora combinadas para a execução", example = "2026-09-20T14:30:00")

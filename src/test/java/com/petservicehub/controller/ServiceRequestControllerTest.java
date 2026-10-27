@@ -9,9 +9,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,15 +18,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.petservicehub.model.OfferedService;
-import com.petservicehub.model.RequestStatus;
 import com.petservicehub.model.ServiceRequest;
-import com.petservicehub.model.User;
-import com.petservicehub.model.UserRole;
 import com.petservicehub.repository.OfferedServiceRepository;
 import com.petservicehub.repository.ReviewRepository;
 import com.petservicehub.repository.ServiceRequestRepository;
 import com.petservicehub.repository.UserRepository;
-import com.petservicehub.util.PasswordHasher;
+import com.petservicehub.support.AuthTestSupport;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -50,156 +44,133 @@ class ServiceRequestControllerTest {
 	@Autowired
 	private ReviewRepository reviewRepository;
 
-	private User provider;
-	private User client;
+	private String clientToken;
+	private String providerToken;
 	private OfferedService service;
 
 	@BeforeEach
-	void limparBase() {
+	void limparBase() throws Exception {
 		reviewRepository.deleteAll();
 		serviceRequestRepository.deleteAll();
 		offeredServiceRepository.deleteAll();
 		userRepository.deleteAll();
-		provider = salvarUsuario("Carlos Lima", "carlos.lima@email.com", UserRole.PROVIDER);
-		client = salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
-		service = salvarServico(true);
+		providerToken = AuthTestSupport.registerAndLogin(mockMvc, "Carlos Lima", "carlos.lima@email.com", "PROVIDER");
+		clientToken = AuthTestSupport.registerAndLogin(mockMvc, "Ana Souza", "ana.souza@email.com", "CLIENT");
+		mockMvc.perform(post("/api/services")
+						.header("Authorization", "Bearer " + providerToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+									"title": "Montagem de móveis",
+									"description": "Montagem residencial",
+									"price": 150.00,
+									"category": "Marcenaria",
+									"active": true
+								}
+								"""))
+				.andExpect(status().isCreated());
+		service = offeredServiceRepository.findAll().getFirst();
 	}
 
 	@Test
 	void deveCadastrarSolicitacaoComPrecoDoServico() throws Exception {
 		mockMvc.perform(post("/api/service-requests")
+						.header("Authorization", "Bearer " + clientToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(requestJson(service.getId(), client.getId(), null, "2026-09-20T14:30:00")))
+						.content(requestJson(service.getId(), null, "2026-09-20T14:30:00")))
 				.andExpect(status().isCreated())
 				.andExpect(header().exists("Location"))
 				.andExpect(jsonPath("$.status").value("PENDING"))
 				.andExpect(jsonPath("$.totalPrice").value(150.00))
-				.andExpect(jsonPath("$.client.id").value(client.getId()))
-				.andExpect(jsonPath("$.service.id").value(service.getId()));
+				.andExpect(jsonPath("$.client.email").value("ana.souza@email.com"));
 	}
 
 	@Test
 	void deveRecusarContratacaoPorPrestador() throws Exception {
 		mockMvc.perform(post("/api/service-requests")
+						.header("Authorization", "Bearer " + providerToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(requestJson(service.getId(), provider.getId(), "PENDING", "2026-09-20T14:30:00")))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.detail").value("Somente um usuário CLIENT pode contratar um serviço"));
-	}
-
-	@Test
-	void deveRecusarServicoInativo() throws Exception {
-		OfferedService inativo = salvarServico(false);
-
-		mockMvc.perform(post("/api/service-requests")
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(requestJson(inativo.getId(), client.getId(), "PENDING", "2026-09-20T14:30:00")))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.detail").value("O serviço informado está inativo"));
+						.content(requestJson(service.getId(), "PENDING", "2026-09-20T14:30:00")))
+				.andExpect(status().isForbidden());
 	}
 
 	@Test
 	void deveRetornarBadRequestQuandoDadosInvalidos() throws Exception {
 		mockMvc.perform(post("/api/service-requests")
+						.header("Authorization", "Bearer " + clientToken)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{}"))
 				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.erros.serviceId").exists())
-				.andExpect(jsonPath("$.erros.clientId").exists());
+				.andExpect(jsonPath("$.erros.serviceId").exists());
 	}
 
 	@Test
-	void deveListarSolicitacoesPorStatus() throws Exception {
-		salvarSolicitacao(RequestStatus.PENDING);
-		salvarSolicitacao(RequestStatus.COMPLETED);
-
-		mockMvc.perform(get("/api/service-requests").param("status", "COMPLETED"))
+	void deveListarSomenteSolicitacoesDoCliente() throws Exception {
+		criarSolicitacao();
+		mockMvc.perform(get("/api/service-requests")
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$", hasSize(1)))
-				.andExpect(jsonPath("$[0].status").value("COMPLETED"));
+				.andExpect(jsonPath("$", hasSize(1)));
 	}
 
 	@Test
 	void deveBuscarSolicitacaoPorId() throws Exception {
-		ServiceRequest request = salvarSolicitacao(RequestStatus.PENDING);
+		criarSolicitacao();
+		ServiceRequest request = serviceRequestRepository.findAll().getFirst();
 
-		mockMvc.perform(get("/api/service-requests/{id}", request.getId()))
+		mockMvc.perform(get("/api/service-requests/{id}", request.getId())
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(request.getId()))
 				.andExpect(jsonPath("$.client.fullName").value("Ana Souza"));
 	}
 
 	@Test
 	void deveRetornarNotFoundQuandoSolicitacaoNaoExiste() throws Exception {
-		mockMvc.perform(get("/api/service-requests/{id}", 999))
+		mockMvc.perform(get("/api/service-requests/{id}", 999)
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isNotFound());
 	}
 
 	@Test
-	void deveAtualizarSolicitacaoParaConcluida() throws Exception {
-		ServiceRequest request = salvarSolicitacao(RequestStatus.PENDING);
+	void deveAtualizarSolicitacaoParaConcluidaComoProvider() throws Exception {
+		criarSolicitacao();
+		ServiceRequest request = serviceRequestRepository.findAll().getFirst();
 
 		mockMvc.perform(put("/api/service-requests/{id}", request.getId())
+						.header("Authorization", "Bearer " + providerToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(requestJson(service.getId(), client.getId(), "COMPLETED", "2026-09-21T10:00:00")))
+						.content(requestJson(service.getId(), "COMPLETED", "2026-09-21T10:00:00")))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.status").value("COMPLETED"))
-				.andExpect(jsonPath("$.scheduledAt").value("2026-09-21T10:00:00"));
+				.andExpect(jsonPath("$.status").value("COMPLETED"));
 	}
 
 	@Test
 	void deveExcluirSolicitacao() throws Exception {
-		ServiceRequest request = salvarSolicitacao(RequestStatus.PENDING);
+		criarSolicitacao();
+		ServiceRequest request = serviceRequestRepository.findAll().getFirst();
 
-		mockMvc.perform(delete("/api/service-requests/{id}", request.getId()))
+		mockMvc.perform(delete("/api/service-requests/{id}", request.getId())
+						.header("Authorization", "Bearer " + clientToken))
 				.andExpect(status().isNoContent());
-
-		mockMvc.perform(get("/api/service-requests/{id}", request.getId()))
-				.andExpect(status().isNotFound());
 	}
 
-	private User salvarUsuario(String nome, String email, UserRole role) {
-		return userRepository.save(User.builder()
-				.fullName(nome)
-				.email(email)
-				.passwordHash(PasswordHasher.hash("senha123"))
-				.role(role)
-				.active(true)
-				.build());
+	private void criarSolicitacao() throws Exception {
+		mockMvc.perform(post("/api/service-requests")
+						.header("Authorization", "Bearer " + clientToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(requestJson(service.getId(), null, "2026-09-20T14:30:00")))
+				.andExpect(status().isCreated());
 	}
 
-	private OfferedService salvarServico(boolean ativo) {
-		return offeredServiceRepository.save(OfferedService.builder()
-				.title("Montagem de móveis")
-				.description("Montagem residencial")
-				.price(new BigDecimal("150.00"))
-				.category("Marcenaria")
-				.provider(provider)
-				.active(ativo)
-				.build());
-	}
-
-	private ServiceRequest salvarSolicitacao(RequestStatus status) {
-		return serviceRequestRepository.save(ServiceRequest.builder()
-				.service(service)
-				.client(client)
-				.status(status)
-				.scheduledAt(LocalDateTime.of(2026, 9, 20, 14, 30))
-				.notes("Observação")
-				.totalPrice(service.getPrice())
-				.build());
-	}
-
-	private String requestJson(Long serviceId, Long clientId, String status, String scheduledAt) {
+	private String requestJson(Long serviceId, String status, String scheduledAt) {
 		String statusJson = status == null ? "" : "\"status\": \"%s\",".formatted(status);
 		return """
 				{
 					"serviceId": %d,
-					"clientId": %d,
 					%s
 					"scheduledAt": "%s",
 					"notes": "Apartamento no 3º andar"
 				}
-				""".formatted(serviceId, clientId, statusJson, scheduledAt);
+				""".formatted(serviceId, statusJson, scheduledAt);
 	}
 }

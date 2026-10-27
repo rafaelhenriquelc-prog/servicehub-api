@@ -33,9 +33,11 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
 			where (:status is null or r.status = :status)
 			and (:clientId is null or r.client.id = :clientId)
 			and (:serviceId is null or r.service.id = :serviceId)
+			and (:providerId is null or s.provider.id = :providerId)
 			""")
 	List<ServiceRequest> findAllWithRelations(
 			@Param("status") RequestStatus status,
 			@Param("clientId") Long clientId,
-			@Param("serviceId") Long serviceId);
+			@Param("serviceId") Long serviceId,
+			@Param("providerId") Long providerId);
 }

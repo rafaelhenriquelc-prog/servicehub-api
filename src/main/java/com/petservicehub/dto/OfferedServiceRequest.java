@@ -9,7 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-@Schema(description = "Dados para cadastro ou atualização de um serviço")
+@Schema(description = "Dados para cadastro ou atualização de um serviço. O prestador é o usuário autenticado.")
 public record OfferedServiceRequest(
 
 		@NotBlank(message = "O título é obrigatório")
@@ -32,10 +32,6 @@ public record OfferedServiceRequest(
 		@Size(max = 80, message = "A categoria deve ter no máximo 80 caracteres")
 		@Schema(description = "Categoria do serviço", example = "Marcenaria")
 		String category,
-
-		@NotNull(message = "O prestador é obrigatório")
-		@Schema(description = "Identificador do usuário prestador (PROVIDER)", example = "2")
-		Long providerId,
 
 		@Schema(description = "Indica se o serviço está ativo", example = "true")
 		Boolean active

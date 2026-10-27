@@ -11,6 +11,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 
 import com.petservicehub.dto.ReviewRequest;
 import com.petservicehub.exception.BusinessException;
@@ -38,9 +39,11 @@ class ReviewServiceTest {
 
 	@Test
 	void deveRecusarAvaliacaoQuandoSolicitacaoNaoEstaCompleted() {
-		when(serviceRequestService.buscarEntidade(1L)).thenReturn(solicitacao(RequestStatus.PENDING, 2L));
+		User client = usuario(2L);
+		when(userService.usuarioAutenticado()).thenReturn(client);
+		when(serviceRequestService.buscarEntidade(1L)).thenReturn(solicitacao(RequestStatus.PENDING, client));
 
-		ReviewRequest request = new ReviewRequest(1L, 2L, 5, "Bom");
+		ReviewRequest request = new ReviewRequest(1L, 5, "Bom");
 
 		assertThatThrownBy(() -> reviewService.criar(request))
 				.isInstanceOf(BusinessException.class)
@@ -51,21 +54,25 @@ class ReviewServiceTest {
 
 	@Test
 	void deveRecusarAvaliadorDiferenteDoCliente() {
-		when(serviceRequestService.buscarEntidade(1L)).thenReturn(solicitacao(RequestStatus.COMPLETED, 2L));
+		User reviewer = usuario(9L);
+		when(userService.usuarioAutenticado()).thenReturn(reviewer);
+		when(serviceRequestService.buscarEntidade(1L)).thenReturn(solicitacao(RequestStatus.COMPLETED, usuario(2L)));
 
-		ReviewRequest request = new ReviewRequest(1L, 9L, 5, "Bom");
+		ReviewRequest request = new ReviewRequest(1L, 5, "Bom");
 
 		assertThatThrownBy(() -> reviewService.criar(request))
-				.isInstanceOf(BusinessException.class)
+				.isInstanceOf(AccessDeniedException.class)
 				.hasMessage("O avaliador deve ser o cliente da solicitação");
 	}
 
 	@Test
 	void deveRecusarSegundaAvaliacao() {
-		when(serviceRequestService.buscarEntidade(1L)).thenReturn(solicitacao(RequestStatus.COMPLETED, 2L));
+		User client = usuario(2L);
+		when(userService.usuarioAutenticado()).thenReturn(client);
+		when(serviceRequestService.buscarEntidade(1L)).thenReturn(solicitacao(RequestStatus.COMPLETED, client));
 		when(reviewRepository.existsByRequestId(1L)).thenReturn(true);
 
-		ReviewRequest request = new ReviewRequest(1L, 2L, 5, "Bom");
+		ReviewRequest request = new ReviewRequest(1L, 5, "Bom");
 
 		assertThatThrownBy(() -> reviewService.criar(request))
 				.isInstanceOf(BusinessException.class)
@@ -74,15 +81,18 @@ class ReviewServiceTest {
 				.isEqualTo(HttpStatus.CONFLICT);
 	}
 
-	private ServiceRequest solicitacao(RequestStatus status, Long clientId) {
-		User client = User.builder()
-				.id(clientId)
+	private User usuario(Long id) {
+		return User.builder()
+				.id(id)
 				.fullName("Cliente")
-				.email("cliente@email.com")
+				.email("cliente" + id + "@email.com")
 				.passwordHash("hash")
 				.role(UserRole.CLIENT)
 				.active(true)
 				.build();
+	}
+
+	private ServiceRequest solicitacao(RequestStatus status, User client) {
 		OfferedService service = OfferedService.builder()
 				.id(10L)
 				.title("Serviço")

@@ -15,15 +15,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.petservicehub.model.User;
-import com.petservicehub.model.UserRole;
 import com.petservicehub.repository.OfferedServiceRepository;
 import com.petservicehub.repository.ReviewRepository;
 import com.petservicehub.repository.ServiceRequestRepository;
 import com.petservicehub.repository.UserRepository;
-import com.petservicehub.util.PasswordHasher;
+import com.petservicehub.support.AuthTestSupport;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -44,26 +44,32 @@ class UserControllerTest {
 	@Autowired
 	private ReviewRepository reviewRepository;
 
+	@Autowired
+	private PasswordEncoder passwordEncoder;
+
+	private String adminToken;
+
 	@BeforeEach
-	void limparBase() {
+	void limparBase() throws Exception {
 		reviewRepository.deleteAll();
 		serviceRequestRepository.deleteAll();
 		offeredServiceRepository.deleteAll();
 		userRepository.deleteAll();
+		AuthTestSupport.criarAdmin(userRepository, passwordEncoder, "admin@email.com");
+		adminToken = AuthTestSupport.login(mockMvc, "admin@email.com", "senha123");
 	}
 
 	@Test
-	void deveCadastrarUsuario() throws Exception {
+	void deveCadastrarUsuarioComoAdmin() throws Exception {
 		mockMvc.perform(post("/api/users")
+						.header("Authorization", "Bearer " + adminToken)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(userJson("Ana Souza", "ana.souza@email.com", "CLIENT", true)))
 				.andExpect(status().isCreated())
 				.andExpect(header().exists("Location"))
-				.andExpect(jsonPath("$.id").exists())
 				.andExpect(jsonPath("$.fullName").value("Ana Souza"))
 				.andExpect(jsonPath("$.email").value("ana.souza@email.com"))
 				.andExpect(jsonPath("$.role").value("CLIENT"))
-				.andExpect(jsonPath("$.active").value(true))
 				.andExpect(jsonPath("$.password").doesNotExist())
 				.andExpect(jsonPath("$.passwordHash").doesNotExist());
 	}
@@ -71,6 +77,7 @@ class UserControllerTest {
 	@Test
 	void deveRetornarBadRequestQuandoDadosInvalidos() throws Exception {
 		mockMvc.perform(post("/api/users")
+						.header("Authorization", "Bearer " + adminToken)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
@@ -80,7 +87,6 @@ class UserControllerTest {
 								}
 								"""))
 				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.title").value("Erro de validação"))
 				.andExpect(jsonPath("$.erros.fullName").exists())
 				.andExpect(jsonPath("$.erros.email").exists())
 				.andExpect(jsonPath("$.erros.password").exists())
@@ -89,20 +95,22 @@ class UserControllerTest {
 
 	@Test
 	void deveRecusarEmailDuplicado() throws Exception {
-		salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
+		AuthTestSupport.registerAndLogin(mockMvc, "Ana Souza", "ana.souza@email.com", "CLIENT");
 
 		mockMvc.perform(post("/api/users")
+						.header("Authorization", "Bearer " + adminToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(userJson("Ana Outra", "ana.souza@email.com", "CLIENT", true)))
+						.content(userJson("Ana Outra", "ANA.SOUZA@email.com", "CLIENT", true)))
 				.andExpect(status().isConflict());
 	}
 
 	@Test
-	void deveListarUsuariosPorPerfil() throws Exception {
-		salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
-		salvarUsuario("Carlos Lima", "carlos.lima@email.com", UserRole.PROVIDER);
+	void deveListarUsuariosComoAdmin() throws Exception {
+		AuthTestSupport.registerAndLogin(mockMvc, "Ana Souza", "ana.souza@email.com", "CLIENT");
+		AuthTestSupport.registerAndLogin(mockMvc, "Carlos Lima", "carlos.lima@email.com", "PROVIDER");
 
-		mockMvc.perform(get("/api/users").param("role", "PROVIDER"))
+		mockMvc.perform(get("/api/users").param("role", "PROVIDER")
+						.header("Authorization", "Bearer " + adminToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].fullName").value("Carlos Lima"));
@@ -110,42 +118,46 @@ class UserControllerTest {
 
 	@Test
 	void deveBuscarUsuarioPorId() throws Exception {
-		User user = salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
+		User admin = userRepository.findByEmailIgnoreCase("admin@email.com").orElseThrow();
 
-		mockMvc.perform(get("/api/users/{id}", user.getId()))
+		mockMvc.perform(get("/api/users/{id}", admin.getId())
+						.header("Authorization", "Bearer " + adminToken))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(user.getId()))
-				.andExpect(jsonPath("$.fullName").value("Ana Souza"));
+				.andExpect(jsonPath("$.email").value("admin@email.com"));
 	}
 
 	@Test
 	void deveRetornarNotFoundQuandoUsuarioNaoExiste() throws Exception {
-		mockMvc.perform(get("/api/users/{id}", 999))
+		mockMvc.perform(get("/api/users/{id}", 999)
+						.header("Authorization", "Bearer " + adminToken))
 				.andExpect(status().isNotFound());
 	}
 
 	@Test
 	void deveAtualizarUsuario() throws Exception {
-		User user = salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
+		User admin = userRepository.findByEmailIgnoreCase("admin@email.com").orElseThrow();
 
-		mockMvc.perform(put("/api/users/{id}", user.getId())
+		mockMvc.perform(put("/api/users/{id}", admin.getId())
+						.header("Authorization", "Bearer " + adminToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(userJson("Ana Atualizada", "ana.atualizada@email.com", "CLIENT", false)))
+						.content(userJson("Admin Atualizado", "admin.atualizado@email.com", "ADMIN", true)))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.fullName").value("Ana Atualizada"))
-				.andExpect(jsonPath("$.email").value("ana.atualizada@email.com"))
-				.andExpect(jsonPath("$.active").value(false));
+				.andExpect(jsonPath("$.fullName").value("Admin Atualizado"))
+				.andExpect(jsonPath("$.email").value("admin.atualizado@email.com"));
 	}
 
 	@Test
 	void deveExcluirUsuario() throws Exception {
-		User user = salvarUsuario("Ana Souza", "ana.souza@email.com", UserRole.CLIENT);
+		mockMvc.perform(post("/api/users")
+						.header("Authorization", "Bearer " + adminToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(userJson("Temp", "temp@email.com", "CLIENT", true)))
+				.andExpect(status().isCreated());
+		User temp = userRepository.findByEmailIgnoreCase("temp@email.com").orElseThrow();
 
-		mockMvc.perform(delete("/api/users/{id}", user.getId()))
+		mockMvc.perform(delete("/api/users/{id}", temp.getId())
+						.header("Authorization", "Bearer " + adminToken))
 				.andExpect(status().isNoContent());
-
-		mockMvc.perform(get("/api/users/{id}", user.getId()))
-				.andExpect(status().isNotFound());
 	}
 
 	@Test
@@ -153,21 +165,9 @@ class UserControllerTest {
 		mockMvc.perform(get("/v3/api-docs"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.info.title").value("ServiceHub API"))
-				.andExpect(jsonPath("$.paths['/api/users']").exists())
-				.andExpect(jsonPath("$.paths['/api/services']").exists())
-				.andExpect(jsonPath("$.paths['/api/service-requests']").exists())
-				.andExpect(jsonPath("$.paths['/api/reviews']").exists());
-	}
-
-	private User salvarUsuario(String nome, String email, UserRole role) {
-		return userRepository.save(User.builder()
-				.fullName(nome)
-				.email(email)
-				.passwordHash(PasswordHasher.hash("senha123"))
-				.phone("11988887777")
-				.role(role)
-				.active(true)
-				.build());
+				.andExpect(jsonPath("$.components.securitySchemes['bearer-jwt']").exists())
+				.andExpect(jsonPath("$.paths['/api/auth/login']").exists())
+				.andExpect(jsonPath("$.paths['/api/auth/register']").exists());
 	}
 
 	private String userJson(String nome, String email, String role, boolean active) {

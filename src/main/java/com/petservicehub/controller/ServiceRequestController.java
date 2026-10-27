@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +25,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,19 +33,21 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/service-requests")
 @RequiredArgsConstructor
-@Tag(name = "Solicitações", description = "CRUD de contratações de serviços feitas por clientes")
+@SecurityRequirement(name = "bearer-jwt")
+@Tag(name = "Solicitações", description = "Contratações autenticadas. O cliente vem do JWT, não do corpo.")
 public class ServiceRequestController {
 
 	private final ServiceRequestService serviceRequestService;
 
 	@PostMapping
+	@PreAuthorize("hasRole('CLIENT')")
 	@Operation(
 			summary = "Cadastrar uma nova solicitação",
-			description = "Contrata um serviço ativo em nome de um usuário CLIENT. O valor total é preenchido automaticamente com o preço do serviço. Se o status não for enviado, a solicitação nasce como PENDING.")
+			description = "O CLIENT autenticado contrata um serviço ativo. O clientId não é aceito no corpo. O valor total copia o preço do serviço e o status inicial é PENDING.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "201", description = "Solicitação cadastrada com sucesso"),
-			@ApiResponse(responseCode = "400", description = "Dados inválidos, cliente incompatível ou serviço inativo"),
-			@ApiResponse(responseCode = "404", description = "Serviço ou cliente não encontrado")
+			@ApiResponse(responseCode = "400", description = "Dados inválidos ou serviço inativo"),
+			@ApiResponse(responseCode = "403", description = "Somente CLIENT pode contratar")
 	})
 	public ResponseEntity<ServiceRequestResponse> criar(@Valid @RequestBody ServiceRequestInput request) {
 		ServiceRequestResponse criado = serviceRequestService.criar(request);
@@ -55,26 +59,27 @@ public class ServiceRequestController {
 	}
 
 	@GetMapping
+	@PreAuthorize("isAuthenticated()")
 	@Operation(
 			summary = "Listar solicitações",
-			description = "Retorna as solicitações cadastradas. Os filtros opcionais permitem consultar por status, cliente e serviço.")
+			description = "CLIENT vê apenas as próprias. PROVIDER vê as dos seus serviços. ADMIN vê todas.")
 	@ApiResponse(responseCode = "200", description = "Lista de solicitações retornada com sucesso")
 	public ResponseEntity<List<ServiceRequestResponse>> listar(
-			@Parameter(description = "Status da solicitação: PENDING, ACCEPTED, IN_PROGRESS, COMPLETED ou CANCELLED")
+			@Parameter(description = "Status da solicitação")
 			@RequestParam(required = false) RequestStatus status,
-			@Parameter(description = "Identificador único do cliente. Quando informado, retorna somente as solicitações desse usuário")
+			@Parameter(description = "Identificador do cliente (respeitado somente para ADMIN)")
 			@RequestParam(required = false) Long clientId,
-			@Parameter(description = "Identificador único do serviço. Quando informado, retorna somente as solicitações desse serviço")
+			@Parameter(description = "Identificador do serviço")
 			@RequestParam(required = false) Long serviceId) {
 		return ResponseEntity.ok(serviceRequestService.listar(status, clientId, serviceId));
 	}
 
 	@GetMapping("/{id}")
-	@Operation(
-			summary = "Buscar solicitação por id",
-			description = "Localiza uma solicitação específica pelo identificador único, incluindo serviço, cliente, status, valor total e datas.")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Buscar solicitação por id", description = "CLIENT acessa a própria. PROVIDER acessa se o serviço for dele. ADMIN acessa qualquer uma.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Solicitação encontrada"),
+			@ApiResponse(responseCode = "403", description = "Solicitação de outro usuário"),
 			@ApiResponse(responseCode = "404", description = "Solicitação não encontrada")
 	})
 	public ResponseEntity<ServiceRequestResponse> buscarPorId(
@@ -84,13 +89,12 @@ public class ServiceRequestController {
 	}
 
 	@PutMapping("/{id}")
-	@Operation(
-			summary = "Atualizar uma solicitação",
-			description = "Atualiza serviço, cliente, data agendada, observações e status. O valor total é recalculado com o preço atual do serviço informado.")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Atualizar uma solicitação", description = "CLIENT altera a própria (inclusive cancelar). PROVIDER atualiza o status das solicitações dos seus serviços.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Solicitação atualizada com sucesso"),
-			@ApiResponse(responseCode = "400", description = "Dados inválidos, cliente incompatível ou serviço inativo"),
-			@ApiResponse(responseCode = "404", description = "Solicitação, serviço ou cliente não encontrado")
+			@ApiResponse(responseCode = "403", description = "Solicitação de outro usuário"),
+			@ApiResponse(responseCode = "404", description = "Solicitação não encontrada")
 	})
 	public ResponseEntity<ServiceRequestResponse> atualizar(
 			@Parameter(description = "Identificador único da solicitação que será atualizada")
@@ -100,11 +104,11 @@ public class ServiceRequestController {
 	}
 
 	@DeleteMapping("/{id}")
-	@Operation(
-			summary = "Excluir uma solicitação",
-			description = "Remove a solicitação do cadastro. A exclusão é recusada quando já existe uma avaliação vinculada.")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Excluir uma solicitação", description = "Somente quem tem acesso à solicitação pode excluí-la, se não houver avaliação.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "204", description = "Solicitação excluída com sucesso"),
+			@ApiResponse(responseCode = "403", description = "Solicitação de outro usuário"),
 			@ApiResponse(responseCode = "404", description = "Solicitação não encontrada"),
 			@ApiResponse(responseCode = "409", description = "Solicitação possui avaliação vinculada")
 	})

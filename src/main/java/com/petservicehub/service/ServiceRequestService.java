@@ -3,6 +3,7 @@ package com.petservicehub.service;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,13 +33,19 @@ public class ServiceRequestService {
 
 	@Transactional
 	public ServiceRequestResponse criar(ServiceRequestInput request) {
+		User client = userService.usuarioAutenticado();
+		if (client.getRole() != UserRole.CLIENT) {
+			throw new AccessDeniedException("Somente um CLIENT pode contratar um serviço");
+		}
+		if (!Boolean.TRUE.equals(client.getActive())) {
+			throw new BusinessException(HttpStatus.BAD_REQUEST, "O cliente autenticado está inativo");
+		}
 		OfferedService service = offeredServiceService.buscarEntidade(request.serviceId());
-		User client = clienteAtivo(request.clientId());
 		validarServicoAtivo(service);
 		ServiceRequest entity = ServiceRequest.builder()
 				.service(service)
 				.client(client)
-				.status(request.status() != null ? request.status() : RequestStatus.PENDING)
+				.status(RequestStatus.PENDING)
 				.scheduledAt(request.scheduledAt())
 				.notes(request.notes())
 				.totalPrice(service.getPrice())
@@ -49,7 +56,15 @@ public class ServiceRequestService {
 
 	@Transactional(readOnly = true)
 	public List<ServiceRequestResponse> listar(RequestStatus status, Long clientId, Long serviceId) {
-		return serviceRequestRepository.findAllWithRelations(status, clientId, serviceId)
+		User current = userService.usuarioAutenticado();
+		Long filtroCliente = clientId;
+		Long filtroPrestador = null;
+		if (current.getRole() == UserRole.CLIENT) {
+			filtroCliente = current.getId();
+		} else if (current.getRole() == UserRole.PROVIDER) {
+			filtroPrestador = current.getId();
+		}
+		return serviceRequestRepository.findAllWithRelations(status, filtroCliente, serviceId, filtroPrestador)
 				.stream()
 				.map(EntityMapper::toResponse)
 				.toList();
@@ -57,22 +72,41 @@ public class ServiceRequestService {
 
 	@Transactional(readOnly = true)
 	public ServiceRequestResponse buscarPorId(Long id) {
-		return EntityMapper.toResponse(buscarEntidade(id));
+		ServiceRequest entity = buscarEntidade(id);
+		garantirAcesso(entity);
+		return EntityMapper.toResponse(entity);
 	}
 
 	@Transactional
 	public ServiceRequestResponse atualizar(Long id, ServiceRequestInput request) {
 		ServiceRequest entity = buscarEntidade(id);
+		garantirAcesso(entity);
+		User current = userService.usuarioAutenticado();
 		OfferedService service = offeredServiceService.buscarEntidade(request.serviceId());
-		User client = clienteAtivo(request.clientId());
-		validarServicoAtivo(service);
-		entity.setService(service);
-		entity.setClient(client);
-		entity.setScheduledAt(request.scheduledAt());
-		entity.setNotes(request.notes());
-		entity.setTotalPrice(service.getPrice());
-		if (request.status() != null) {
-			entity.setStatus(request.status());
+		if (current.getRole() == UserRole.CLIENT) {
+			validarServicoAtivo(service);
+			entity.setService(service);
+			entity.setScheduledAt(request.scheduledAt());
+			entity.setNotes(request.notes());
+			if (request.status() != null && request.status() != RequestStatus.CANCELLED) {
+				throw new AccessDeniedException("O cliente só pode cancelar a própria solicitação");
+			}
+			if (request.status() == RequestStatus.CANCELLED) {
+				entity.setStatus(RequestStatus.CANCELLED);
+			}
+		} else if (current.getRole() == UserRole.PROVIDER) {
+			if (request.status() != null) {
+				entity.setStatus(request.status());
+			}
+		} else {
+			validarServicoAtivo(service);
+			entity.setService(service);
+			entity.setScheduledAt(request.scheduledAt());
+			entity.setNotes(request.notes());
+			if (request.status() != null) {
+				entity.setStatus(request.status());
+			}
+			entity.setTotalPrice(service.getPrice());
 		}
 		serviceRequestRepository.save(entity);
 		return EntityMapper.toResponse(buscarEntidade(id));
@@ -81,6 +115,7 @@ public class ServiceRequestService {
 	@Transactional
 	public void excluir(Long id) {
 		ServiceRequest entity = buscarEntidade(id);
+		garantirAcesso(entity);
 		if (reviewRepository.existsByRequestId(id)) {
 			throw new BusinessException(HttpStatus.CONFLICT, "Não é possível excluir a solicitação porque existe uma avaliação vinculada");
 		}
@@ -93,15 +128,18 @@ public class ServiceRequestService {
 				.orElseThrow(() -> new ResourceNotFoundException("Solicitação não encontrada com id " + id));
 	}
 
-	private User clienteAtivo(Long clientId) {
-		User client = userService.buscarEntidade(clientId);
-		if (client.getRole() != UserRole.CLIENT) {
-			throw new BusinessException(HttpStatus.BAD_REQUEST, "Somente um usuário CLIENT pode contratar um serviço");
+	private void garantirAcesso(ServiceRequest entity) {
+		User current = userService.usuarioAutenticado();
+		if (current.getRole() == UserRole.ADMIN) {
+			return;
 		}
-		if (!Boolean.TRUE.equals(client.getActive())) {
-			throw new BusinessException(HttpStatus.BAD_REQUEST, "O cliente informado está inativo");
+		if (current.getRole() == UserRole.CLIENT && entity.getClient().getId().equals(current.getId())) {
+			return;
 		}
-		return client;
+		if (current.getRole() == UserRole.PROVIDER && entity.getService().getProvider().getId().equals(current.getId())) {
+			return;
+		}
+		throw new AccessDeniedException("Você não pode acessar a solicitação de outro usuário");
 	}
 
 	private void validarServicoAtivo(OfferedService service) {
